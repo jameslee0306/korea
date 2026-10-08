@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>전도 — Motion Reel</title>
+<style>
+@font-face{font-family:'BHS';src:url(fonts/BlackHanSans-400.ttf)}
+@font-face{font-family:'MJ';src:url(fonts/NanumMyeongjo-800.ttf)}
+@font-face{font-family:'MONO';src:url(fonts/NanumGothicCoding-400.ttf);font-weight:400}
+@font-face{font-family:'MONO';src:url(fonts/NanumGothicCoding-700.ttf);font-weight:700}
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+canvas{width:100vw;max-width:calc(100vh*16/9);aspect-ratio:16/9;display:block;background:#000}
+#play{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);
+  color:#ffcf6b;font:700 28px MONO,monospace;letter-spacing:.2em;cursor:pointer;border:0}
+body.render #play{display:none}
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<button id="play">▶ PLAY — 전도</button>
+<audio id="music" src="music.mp3" preload="auto"></audio>
+<script>
+// ───────────────────────── core ─────────────────────────
+const W=1920,H=1080,DUR=30;
+const B0=0.09,BEAT=0.375,BAR=1.5;           // 160 BPM, downbeat phase measured from the track
+const T2=B0+4*BAR,T3=B0+8*BAR,T4=B0+12*BAR,T5=B0+16*BAR; // scene cuts on downbeats
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const GOLD='#ffcf6b',RED='#ff3045',INK='#05060a';
+
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const inv=(a,b,x)=>clamp((x-a)/(b-a));
+const eOutExpo=t=>t>=1?1:1-Math.pow(2,-10*t);
+const eOutCubic=t=>1-Math.pow(1-t,3);
+const eInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eInCubic=t=>t*t*t;
+const eOutBack=t=>{const c1=1.9,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)};
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const bt=k=>B0+k*BEAT;
+function pulse(t,period=BEAT,decay=8){if(t<B0)return 0;return Math.exp(-((t-B0)%period)*decay)}
+function mk(w=W,h=H){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function shake(t,amp){return[amp*(Math.sin(t*91.7)+Math.sin(t*53.3+1))*.5,amp*(Math.sin(t*77.1+2)+Math.sin(t*41.9))*.5]}
+
+// ───────────────────── hangul typewriter ─────────────────────
+// 한글 음절을 자모 단위로 분해해 "ㅈ → 저 → 전" 처럼 실제 타이핑되는 과정을 보여준다
+const KEYS=[],BELLS=[];
+const CL='ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+function stages(ch){const c=ch.charCodeAt(0)-0xAC00;if(c<0||c>11171)return[ch];
+  const L=Math.floor(c/588),V=Math.floor(c%588/28),T=c%28;
+  const s=[CL[L],String.fromCharCode(0xAC00+L*588+V*28)];if(T)s.push(ch);return s}
+function TL(text,t0,rate,seed=1){
+  const r=rng(seed*7919+text.length*31);let t=t0;
+  const chars=[...text].map(ch=>{const c={ch,st:stages(ch),times:[],jy:(r()-.5)*6,rot:(r()-.5)*.045,ink:.8+.2*r()};
+    for(let i=0;i<c.st.length;i++){c.times.push(t);if(ch!==' ')KEYS.push(t);t+=rate*(.6+.8*r())}
+    if(ch===' ')t+=rate*.5;return c});
+  BELLS.push(t+.04);return{text,t0,chars,end:t};
+}
+function caretOn(t){return((t-B0)/BEAT)%1<.55}
+function drawTL(L,t,x,y,o={}){
+  if(t<L.t0-(o.pre??0))return;
+  ctx.save();ctx.font=o.font;ctx.textBaseline='alphabetic';ctx.textAlign='center';
+  const size=parseFloat(o.font.match(/(\d+)px/)[1]);
+  const ws=L.chars.map(c=>ctx.measureText(c.ch).width+(o.ls||0));
+  const total=ws.reduce((a,b)=>a+b,0);
+  let cx=o.align==='left'?x:x-total/2,typing=false;const a0=o.alpha??1;
+  for(let i=0;i<L.chars.length;i++){
+    const c=L.chars[i];let si=-1;for(let k=0;k<c.times.length;k++)if(t>=c.times[k])si=k;
+    if(si<0)break;
+    const age=t-c.times[si],pop=Math.exp(-age*20);
+    if(c.ch!==' '){
+      ctx.save();ctx.translate(cx+ws[i]/2,y+c.jy-pop*size*.14);ctx.rotate(c.rot);ctx.scale(1+pop*.3,1+pop*.3);
+      ctx.globalAlpha=a0*c.ink;
+      if(o.glow){ctx.shadowColor=o.glow;ctx.shadowBlur=(o.glowSize||14)+pop*36}
+      ctx.fillStyle=pop>.35?(o.hot||'#fff'):o.color;ctx.fillText(c.st[si],0,0);
+      // ink strike flash
+      if(pop>.15&&o.strike!==false){ctx.globalCompositeOperation='lighter';ctx.globalAlpha=a0*pop*.6;ctx.fillStyle=o.glow||GOLD;
+        ctx.fillRect(-ws[i]*.55,size*.12,ws[i]*1.1,2)}
+      ctx.restore();
+    }
+    cx+=ws[i];if(age<.12)typing=true;
+  }
+  if(o.caret!==false&&t<L.end+(o.caretHold??1.0)&&(typing||caretOn(t))){
+    ctx.globalAlpha=a0;ctx.fillStyle=o.caretColor||GOLD;ctx.shadowColor=o.caretColor||GOLD;ctx.shadowBlur=16;
+    ctx.fillRect(cx+size*.08,y-size*.86,Math.max(3,size*.09),size*1.02);
+  }
+  ctx.restore();
+}
+
+// ───────────────────── lyrics (typed) ─────────────────────
+const LY={
+  a1:TL('어둠 속을 걷던 나에게',.55,.062,1),
+  a2:TL('누군가 빛을 건네주었네',bt(8)+.05,.058,2),
+  b1:TL('너희는 온 천하에 다니며',bt(24)+.08,.044,3),
+  b2:TL('만민에게 복음을 전파하라',bt(28)+.02,.042,4),
+  c1:TL('한 사람이, 또 한 사람에게',T3+.12,.05,5),
+  c2:TL('— 사도행전 1:8',bt(46)+.08,.03,6),
+  d1:TL('아름답도다',T4+.12,.07,7),
+  d2:TL('좋은 소식을 전하는 자들의 발이여',bt(52)+.05,.042,8),
+  e1:TL('오늘, 당신이 그 한 사람입니다.',bt(70)+.02,.048,9),
+};
+
+// ───────────────────── shared assets ─────────────────────
+const R0=rng(42);
+// grain
+const GR=[...Array(6)].map((_,n)=>{const c=mk(480,270),g=c.getContext('2d'),d=g.createImageData(480,270),r=rng(100+n);
+  for(let i=0;i<d.data.length;i+=4){const v=r()*255;d.data[i]=d.data[i+1]=d.data[i+2]=v;d.data[i+3]=r()*70}g.putImageData(d,0,0);return c});
+// vignette
+const VIG=(()=>{const c=mk(),g=c.getContext('2d'),gr=g.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*1.05);
+  gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,'rgba(0,0,0,.85)');g.fillStyle=gr;g.fillRect(0,0,W,H);return c})();
+const FX=mk(),fxc=FX.getContext('2d'),CH=mk(),chc=CH.getContext('2d'),TX=mk(),txc=TX.getContext('2d');
+
+// cross particles (scene 1 → burst into scene 2)
+const CROSS={x:960,y:420};
+const PN=1500,P=[...Array(PN)].map(()=>{
+  let tx,ty;if(R0()<.62){tx=(R0()-.5)*76;ty=-300+R0()*600}else{tx=(R0()-.5)*400;ty=-175+R0()*72}
+  const a=R0()*Math.PI*2;
+  return{x:R0()*W,y:R0()*H,tx:CROSS.x+tx,ty:CROSS.y+ty,ph:R0()*6.28,sp:.3+R0(),d:R0()*.9,s:.8+R0()*2.2,
+    ba:a,bv:300+R0()*1400}});
+
+// globe points (fibonacci sphere)
+const GN=2600,GP=[...Array(GN)].map((_,i)=>{const y=1-2*(i+.5)/GN,r=Math.sqrt(1-y*y),th=i*2.399963;return[Math.cos(th)*r,y,Math.sin(th)*r]});
+const ll=(la,lo)=>{la*=Math.PI/180;lo*=Math.PI/180;return[Math.cos(la)*Math.sin(lo),Math.sin(la),Math.cos(la)*Math.cos(lo)]};
+const ORIG=ll(37.5,127);   // 한국에서 시작
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const spread=t=>{const lt=t-T3;if(lt<0)return 0;const k=Math.floor(lt/BEAT),f=eOutExpo((lt%BEAT)/BEAT);
+  return Math.PI*Math.pow(clamp((k+f)/15),1.35)};
+const ARCS=(()=>{const r=rng(7),out=[];
+  for(let k=0;k<16;k++)for(let j=0;j<(k<4?2:4);j++){
+    const t0=T3+k*BEAT+j*.07,ang=Math.max(.05,spread(t0));let a,b,tries=0;
+    do{a=GP[Math.floor(r()*GN)];tries++}while(Math.acos(clamp(dot(a,ORIG),-1,1))>ang&&tries<4000);
+    if(k===0)a=ORIG;
+    do{b=GP[Math.floor(r()*GN)]}while(Math.acos(clamp(dot(a,b),-1,1))<.35||Math.acos(clamp(dot(a,b),-1,1))>1.3);
+    out.push({a,b,t0})}return out})();
+const EMB=[...Array(520)].map(()=>({a:R0()*6.283,v:200+R0()*1300,s:.6+R0()*2.6,ph:R0()*6.28,up:20+R0()*90}));
+
+// ───────────────────── scene 1 : darkness → light ─────────────────────
+function scene1(t){
+  ctx.fillStyle=INK;ctx.fillRect(0,0,W,H);
+  const zoom=1+eInCubic(inv(5.4,T2,t))*1.4;
+  ctx.save();ctx.translate(CROSS.x,CROSS.y);ctx.scale(zoom,zoom);ctx.translate(-CROSS.x,-CROSS.y);
+  const conv=t=>eInOut(inv(2.6,5.5,t));
+  const lightUp=inv(4.3,5.6,t);
+  // god rays
+  if(lightUp>0){ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(CROSS.x,CROSS.y);
+    for(let i=0;i<28;i++){const a=i/28*6.283+t*.12,w=.035+.03*Math.sin(i*3.1);
+      const g=ctx.createRadialGradient(0,0,0,0,0,1300);g.addColorStop(0,`rgba(255,207,107,${.16*lightUp*(1+pulse(t,BAR,4))})`);g.addColorStop(1,'rgba(255,207,107,0)');
+      ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,1300,a-w,a+w);ctx.fill()}
+    const g=ctx.createRadialGradient(0,0,0,0,0,600);g.addColorStop(0,`rgba(255,230,170,${.55*lightUp})`);g.addColorStop(1,'rgba(255,200,100,0)');
+    ctx.fillStyle=g;ctx.fillRect(-600,-600,1200,1200);ctx.restore()}
+  // heartbeat light
+  const hb=pulse(t,BAR,5)*(1-lightUp);
+  if(t>B0){ctx.save();ctx.globalCompositeOperation='lighter';const g=ctx.createRadialGradient(CROSS.x,CROSS.y,0,CROSS.x,CROSS.y,40+hb*160);
+    g.addColorStop(0,`rgba(255,230,180,${.9*(1-lightUp*.5)})`);g.addColorStop(1,'rgba(255,190,90,0)');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.restore()}
+  // particles
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(const p of P){const c=conv(t-p.d*.6);
+    const dx=p.x+Math.sin(t*p.sp+p.ph)*40,dy=p.y+Math.cos(t*p.sp*.7+p.ph)*30-t*8;
+    const x=lerp(dx,p.tx,c),y=lerp(dy,p.ty,c);
+    const tw=.35+.65*Math.abs(Math.sin(t*2*p.sp+p.ph));
+    ctx.fillStyle=c>.9?`rgba(255,226,160,${.9*tw})`:`rgba(170,190,255,${(.25+.5*c)*tw})`;
+    const s=p.s*(1+c*.6);ctx.fillRect(x-s/2,y-s/2,s,s)}
+  ctx.restore();
+  // solid cross core
+  if(lightUp>0){ctx.save();ctx.globalCompositeOperation='lighter';ctx.shadowColor=GOLD;ctx.shadowBlur=60;
+    ctx.fillStyle=`rgba(255,245,220,${.85*eOutCubic(lightUp)})`;ctx.fillRect(CROSS.x-30,CROSS.y-290,60,580);ctx.fillRect(CROSS.x-185,CROSS.y-160,370,52);ctx.restore()}
+  ctx.restore();
+  // lyrics
+  const up=eOutExpo(inv(bt(8)-.2,bt(8)+.25,t));
+  drawTL(LY.a1,t,960,lerp(880,800,up),{font:'700 56px MONO',color:lerp(1,0,up)>0.5?'#dfe4ef':'#7d8597',glow:'rgba(150,170,255,.6)',alpha:1-up*.45,caretHold:up>0?0:9,pre:.5});
+  drawTL(LY.a2,t,960,895,{font:'700 60px MONO',color:'#fff3dc',glow:GOLD,glowSize:22,hot:'#ffffff'});
+}
+
+// ───────────────────── scene 2 : GO ─────────────────────
+const THEMES=[{bg:'#07070a',fg:'#ffffff',row:'#ffcf6b'},{bg:'#f4f1ea',fg:'#0b0b0d',row:'#0b0b0d'},
+  {bg:GOLD,fg:'#0b0b0d',row:'#0b0b0d'},{bg:'#e3172b',fg:'#ffffff',row:'#ffffff'}];
+const WORDS=['이제','내가','전할','차례'];
+function scene2(t){
+  const lt=t-T2;
+  if(lt<3){
+    const wi=Math.min(3,Math.floor(lt/(2*BEAT))),age=lt-wi*2*BEAT,th=THEMES[wi];
+    ctx.fillStyle=th.bg;ctx.fillRect(0,0,W,H);
+    // scrolling outline rows
+    ctx.save();ctx.translate(W/2,H/2);ctx.rotate(-.14);ctx.font='150px BHS';ctx.lineWidth=2;ctx.strokeStyle=th.row;ctx.globalAlpha=.16;
+    const row='전하라 · GO · 복음 · GOSPEL · ';const rw=ctx.measureText(row).width;
+    for(let r=-4;r<=4;r++){const dir=r%2?1:-1,off=((dir*lt*520+r*331)%rw+rw)%rw;
+      for(let x=-off-W;x<W*1.2;x+=rw)ctx.strokeText(row,x,r*160+50)}
+    ctx.restore();
+    // big word slam
+    const sAt=a=>a<0?2.8:lerp(2.8,1,eOutExpo(a/.22))*(1+.06*Math.exp(-Math.max(0,a-BEAT)*10)*(a>BEAT?1:0));
+    const [sx,sy]=shake(t,26*Math.exp(-Math.max(0,age-.18)*9)*(age>.18?1:0));
+    ctx.save();ctx.translate(W/2+sx,H/2+sy+20);ctx.font='440px BHS';ctx.textAlign='center';ctx.textBaseline='middle';
+    for(let j=4;j>=0;j--){const s=sAt(age-j*.022);ctx.save();ctx.scale(s,s);ctx.globalAlpha=j?.12*(5-j)/5:1;ctx.fillStyle=th.fg;ctx.fillText(WORDS[wi],0,0);ctx.restore()}
+    // off-beat stamp: outline echo
+    const ea=age-BEAT;if(ea>0){ctx.save();const s=1+ea*.9;ctx.scale(s,s);ctx.globalAlpha=Math.max(0,.6-ea*1.4);ctx.lineWidth=4;ctx.strokeStyle=th.fg;ctx.strokeText(WORDS[wi],0,0);ctx.restore()}
+    ctx.restore();
+    // index tag
+    ctx.save();ctx.font='700 26px MONO';ctx.fillStyle=th.fg;ctx.globalAlpha=.75;ctx.fillText(`0${wi+1} / 04`,140,H-170);ctx.fillRect(140,H-160,220*eOutExpo(age/.4),3);ctx.restore();
+    // burst particles from the cross
+    if(lt<1.4){ctx.save();ctx.globalCompositeOperation=wi===0?'lighter':'source-over';
+      for(const p of P){const k=1-Math.exp(-lt*3.2);const x=p.tx+Math.cos(p.ba)*p.bv*k,y=p.ty+Math.sin(p.ba)*p.bv*k;
+        ctx.fillStyle=`rgba(255,215,140,${(1-lt/1.4)})`;const s=p.s*1.6;ctx.fillRect(x,y,s,s)}ctx.restore()}
+    return;
+  }
+  // split: scripture + rotating ring
+  const u=lt-3;
+  ctx.fillStyle='#07070a';ctx.fillRect(0,0,W,H);
+  const rv=eOutExpo(u/.45);
+  ctx.save();ctx.beginPath();ctx.rect(0,0,960*rv,H);ctx.clip();
+  ctx.fillStyle='#0d0d12';ctx.fillRect(0,0,960,H);
+  ctx.font='700 28px MONO';ctx.fillStyle=GOLD;ctx.globalAlpha=inv(.2,.5,u);ctx.letterSpacing='6px';ctx.fillText('MARK 16:15  ·  마가복음',130,360);ctx.letterSpacing='0px';
+  ctx.fillRect(130,380,160*eOutExpo(inv(.2,.8,u)),3);ctx.globalAlpha=1;
+  drawTL(LY.b1,t,130,500,{font:'800 70px MJ',color:'#f5f1e8',align:'left',glow:'rgba(255,207,107,.35)',caretHold:0});
+  drawTL(LY.b2,t,130,610,{font:'800 70px MJ',color:GOLD,align:'left',glow:'rgba(255,207,107,.6)',hot:'#fff'});
+  ctx.restore();
+  // divider
+  ctx.fillStyle=GOLD;ctx.fillRect(959,H/2-H/2*eOutExpo(inv(.1,.6,u)),2,H*eOutExpo(inv(.1,.6,u)));
+  // ring
+  const sc=eOutBack(clamp(u/.6)),cx=1440,cy=540;
+  ctx.save();ctx.translate(cx,cy);ctx.scale(sc,sc);
+  ringText('GO · 가라 · GOSPEL · 복음 · ',330,'52px BHS',GOLD,t*.55);
+  ringText('THE GOOD NEWS · 기쁜 소식 · THE GOOD NEWS · 기쁜 소식 · ',240,'700 24px MONO','rgba(255,255,255,.7)',-t*.8);
+  ctx.strokeStyle='rgba(255,207,107,.35)';ctx.setLineDash([4,10]);ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(0,0,390,0,6.283);ctx.stroke();ctx.beginPath();ctx.arc(0,0,200,0,6.283);ctx.stroke();ctx.setLineDash([]);
+  // beat tick marks orbiting
+  const k=Math.floor((t-B0)/BEAT);ctx.save();ctx.rotate(k*Math.PI/8);ctx.fillStyle=RED;ctx.beginPath();ctx.arc(390,0,9,0,6.283);ctx.fill();ctx.restore();
+  const p=pulse(t,BEAT,9);ctx.font='230px BHS';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.save();ctx.scale(1+.09*p,1+.09*p);ctx.shadowColor=GOLD;ctx.shadowBlur=30+50*p;ctx.fillStyle=GOLD;ctx.fillText('GO',0,12);ctx.restore();
+  ctx.restore();
+}
+function ringText(str,r,font,color,rot){
+  ctx.save();ctx.font=font;ctx.fillStyle=color;ctx.textAlign='center';ctx.textBaseline='middle';
+  const ch=[...str],sw=ctx.measureText(str).width,n=Math.max(1,Math.round(6.283*r/sw)),k=6.283*r/(n*sw);let a=rot;
+  for(let j=0;j<n;j++)for(const c of ch){const w=ctx.measureText(c).width*k;a+=w/2/r;
+    ctx.save();ctx.rotate(a);ctx.translate(0,-r);ctx.fillText(c,0,0);ctx.restore();a+=w/2/r}
+  ctx.restore();
+}
+
+// ───────────────────── scene 3 : one to one → the world ─────────────────────
+function proj(v,yaw,tilt,cx,cy,R){
+  const x1=v[0]*Math.cos(yaw)+v[2]*Math.sin(yaw),z1=-v[0]*Math.sin(yaw)+v[2]*Math.cos(yaw);
+  const y2=v[1]*Math.cos(tilt)-z1*Math.sin(tilt),z2=v[1]*Math.sin(tilt)+z1*Math.cos(tilt);
+  return[cx+R*x1,cy-R*y2,z2];
+}
+function scene3(t){
+  const lt=t-T3;
+  ctx.fillStyle='#04050b';ctx.fillRect(0,0,W,H);
+  const cx=1270,cy=560,R=400*eOutExpo(inv(0,.7,lt))*(1+.012*pulse(t,BEAT,10)),yaw=-127*Math.PI/180+lt*.28,tilt=.55;
+  // atmosphere
+  let g=ctx.createRadialGradient(cx,cy,R*.9,cx,cy,R*1.35);g.addColorStop(0,'rgba(90,140,255,.22)');g.addColorStop(1,'rgba(90,140,255,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  g=ctx.createRadialGradient(cx-R*.3,cy-R*.3,0,cx,cy,R);g.addColorStop(0,'#101a35');g.addColorStop(1,'#05070f');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,R,0,6.283);ctx.fill();
+  const ang=spread(t),ca=Math.cos(ang);
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(let i=0;i<GN;i++){const v=GP[i],[x,y,z]=proj(v,yaw,tilt,cx,cy,R);if(z<-.05)continue;
+    const d=dot(v,ORIG),lit=d>ca,edge=lit&&d<ca+.04;
+    const s=(1.4+z*2.2)*(edge?2.2:1);
+    ctx.fillStyle=lit?(edge?`rgba(255,255,230,${.95})`:`rgba(255,200,100,${.35+.6*z})`):`rgba(120,150,230,${.1+.35*z})`;
+    ctx.fillRect(x-s/2,y-s/2,s,s)}
+  // arcs
+  for(const A of ARCS){const age=t-A.t0;if(age<0||age>1.3)continue;
+    const prog=eOutCubic(clamp(age/.7)),fade=1-inv(.8,1.3,age),om=Math.acos(clamp(dot(A.a,A.b),-1,1));
+    let prev=null;ctx.lineWidth=2.4;
+    for(let s=Math.max(0,prog-.55);s<=prog+1e-6;s+=.03){
+      const sa=Math.sin((1-s)*om)/Math.sin(om),sb=Math.sin(s*om)/Math.sin(om),h=1+.22*Math.sin(Math.PI*s)*om;
+      const v=[(A.a[0]*sa+A.b[0]*sb)*h,(A.a[1]*sa+A.b[1]*sb)*h,(A.a[2]*sa+A.b[2]*sb)*h];const q=proj(v,yaw,tilt,cx,cy,R);
+      if(prev&&q[2]>-.1&&prev[2]>-.1){ctx.strokeStyle=`rgba(255,215,140,${fade*(.25+.75*(s-(prog-.55))/.55)})`;ctx.beginPath();ctx.moveTo(prev[0],prev[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
+      prev=q}
+    if(prev&&prev[2]>-.1){const gg=ctx.createRadialGradient(prev[0],prev[1],0,prev[0],prev[1],18);gg.addColorStop(0,`rgba(255,255,230,${fade})`);gg.addColorStop(1,'rgba(255,200,100,0)');ctx.fillStyle=gg;ctx.fillRect(prev[0]-18,prev[1]-18,36,36)}
+  }
+  // origin ripple
+  const o=proj(ORIG,yaw,tilt,cx,cy,R);if(o[2]>0){const rp=((t-B0)%BAR)/BAR;
+    ctx.strokeStyle=`rgba(255,80,90,${(1-rp)*.9})`;ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(o[0],o[1],10+rp*90,(10+rp*90)*.6,0,0,6.283);ctx.stroke();
+    ctx.fillStyle=RED;ctx.beginPath();ctx.arc(o[0],o[1],7,0,6.283);ctx.fill()}
+  ctx.restore();
+  // orbit ring
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(-.35);ctx.strokeStyle='rgba(255,207,107,.35)';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(0,0,R*1.28,R*.32,0,0,6.283);ctx.stroke();
+  const oa=lt*1.6;ctx.fillStyle=GOLD;ctx.beginPath();ctx.arc(Math.cos(oa)*R*1.28,Math.sin(oa)*R*.32,6,0,6.283);ctx.fill();ctx.restore();
+  // left: counter
+  drawTL(LY.c1,t,120,330,{font:'700 40px MONO',color:'#e8ecf6',align:'left',glow:'rgba(150,180,255,.5)',caretHold:.4});
+  const k=clamp(Math.floor((t-T3)/BEAT),0,15),age=(t-T3)-k*BEAT,pop=Math.exp(-age*14);
+  const glitchT=bt(46);
+  if(t<glitchT){
+    const n=Math.pow(2,k).toLocaleString('en-US');
+    ctx.save();ctx.translate(120,560);ctx.font='190px BHS';ctx.fillStyle=GOLD;ctx.shadowColor=GOLD;ctx.shadowBlur=20+pop*40;
+    ctx.save();ctx.scale(1+pop*.12,1+pop*.12);ctx.fillText(n,0,0);const nw=ctx.measureText(n).width;ctx.restore();
+    ctx.font='700 46px MONO';ctx.fillStyle='#fff';ctx.shadowBlur=0;ctx.fillText('명',nw*(1+pop*.12)+18,-8);
+    ctx.font='700 22px MONO';ctx.fillStyle='rgba(255,255,255,.55)';ctx.letterSpacing='4px';ctx.fillText('× 2  EVERY BEAT  —  복음은 배가된다',4,70);ctx.letterSpacing='0px';
+    // bar
+    ctx.fillStyle='rgba(255,255,255,.15)';ctx.fillRect(4,100,600,4);ctx.fillStyle=RED;ctx.fillRect(4,100,600*(k+1)/16,4);
+    ctx.restore();
+  }else{
+    const ga=t-glitchT;
+    ctx.save();ctx.translate(120,560);ctx.font='150px BHS';
+    const r=rng(Math.floor(t*30));const gl=Math.exp(-ga*6);
+    for(let i=0;i<3;i++){ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle=['#ff3045','#30ffb0','#4060ff'][i];
+      ctx.fillText('땅 끝까지',(i-1)*gl*26+(r()-.5)*gl*40,(r()-.5)*gl*10);ctx.restore()}
+    ctx.fillStyle=GOLD;ctx.globalAlpha=1-gl;ctx.fillText('땅 끝까지',0,0);
+    ctx.restore();
+    drawTL(LY.c2,t,124,660,{font:'700 26px MONO',color:'rgba(255,255,255,.8)',align:'left',strike:false});
+  }
+}
+
+// ───────────────────── scene 4 : beautiful feet ─────────────────────
+const SUN=mk(700,400),sunc=SUN.getContext('2d');
+function camZ(lt){return lt*5.2+Math.pow(Math.max(0,lt-4.3),3)*9}
+function scene4(t){
+  const lt=t-T4,HZ=600,F=760,CH=1;const cz=camZ(lt);
+  // sky
+  let g=ctx.createLinearGradient(0,0,0,HZ);g.addColorStop(0,'#05030e');g.addColorStop(.6,'#2a0f3a');g.addColorStop(1,'#ff7a45');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,HZ);
+  // stars
+  const r=rng(9);ctx.fillStyle='#fff';for(let i=0;i<160;i++){const x=r()*W,y=r()*HZ*.7,s=r()*2;ctx.globalAlpha=.3+.7*Math.abs(Math.sin(t*2+i));ctx.fillRect(x,y,s,s)}ctx.globalAlpha=1;
+  // striped sun
+  sunc.clearRect(0,0,700,400);const sg=sunc.createLinearGradient(0,40,0,400);sg.addColorStop(0,'#fff1b8');sg.addColorStop(.5,GOLD);sg.addColorStop(1,'#ff3a5c');
+  sunc.fillStyle=sg;sunc.beginPath();sunc.arc(350,400,250,0,6.283);sunc.fill();sunc.globalCompositeOperation='destination-out';
+  for(let i=0;i<9;i++){const y=230+i*20+((lt*40)%20),h=2+i*1.6;sunc.fillRect(0,y,700,h)}sunc.globalCompositeOperation='source-over';
+  const rise=eOutCubic(inv(0,6,lt))*60;
+  ctx.save();ctx.shadowColor='#ff8a50';ctx.shadowBlur=80;ctx.drawImage(SUN,960-350,HZ-400+70-rise);ctx.restore();
+  // floor
+  ctx.fillStyle='#070310';ctx.fillRect(0,HZ,W,H-HZ);
+  g=ctx.createLinearGradient(0,HZ-30,0,HZ+60);g.addColorStop(0,'rgba(255,140,80,0)');g.addColorStop(.4,'rgba(255,170,90,.75)');g.addColorStop(1,'rgba(255,140,80,0)');ctx.fillStyle=g;ctx.fillRect(0,HZ-30,W,90);
+  const pb=pulse(t,BAR,4);
+  ctx.save();ctx.beginPath();ctx.rect(0,HZ,W,H-HZ);ctx.clip();ctx.globalCompositeOperation='lighter';
+  ctx.lineWidth=2;
+  for(let X=-16;X<=16;X++){ctx.strokeStyle=`rgba(255,120,200,${.35+.4*pb})`;ctx.beginPath();ctx.moveTo(960+F*X/.25,HZ+F*CH/.25);ctx.lineTo(960+F*X/80,HZ+F*CH/80);ctx.stroke()}
+  for(let n=Math.ceil(cz+.25);n<cz+70;n++){const dz=n-cz,y=HZ+F*CH/dz,a=clamp(1.2-dz/40);
+    ctx.strokeStyle=`rgba(255,${150+60*pb},120,${a*(.5+.5*pb)})`;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+  // footprints of light, stamped on each beat
+  for(let k=0;k<16;k++){const ts=T4+k*BEAT;if(t<ts)break;const Z=camZ(ts-T4)+5.5,X=(k%2?.3:-.3),dz=Z-cz;if(dz<.3)continue;
+    const age=t-ts,fl=Math.exp(-age*6);
+    const P=(x,z)=>[960+F*x/(z-cz),HZ+F*CH/(z-cz)];
+    const heel=P(X,Z-.2),ball=P(X+(k%2?.03:-.03),Z+.12),sz=F/dz*1.7;
+    ctx.fillStyle=`rgba(255,${210+40*fl},${140+100*fl},${.55+.45*fl})`;ctx.shadowColor=GOLD;ctx.shadowBlur=20+40*fl;
+    const ry=Math.max(1.2,(heel[1]-ball[1])*.42);
+    ctx.beginPath();ctx.ellipse(heel[0],heel[1],sz*.05,ry*.8,0,0,6.283);ctx.fill();
+    ctx.beginPath();ctx.ellipse(ball[0],ball[1],sz*.065,ry*1.05,0,0,6.283);ctx.fill();
+    for(let i=0;i<5;i++){const side=k%2?1:-1,tx=X+side*(-.1+i*.05)+(k%2?.03:-.03),tz=Z+.29-Math.abs(i-1)*.02;const p=P(tx,tz);
+      ctx.beginPath();ctx.arc(p[0],p[1],Math.max(1,sz*(i===0?.022:.015)),0,6.283);ctx.fill()}
+    if(fl>.05){ctx.strokeStyle=`rgba(255,240,200,${fl})`;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(ball[0],(heel[1]+ball[1])/2,sz*.1*(1+age*6),ry*3*(1+age*6),0,0,6.283);ctx.stroke()}
+  }
+  ctx.restore();
+  // speed lines in the final bar
+  const sp=inv(4.2,6,lt);if(sp>0){ctx.save();ctx.globalCompositeOperation='lighter';const rr=rng(Math.floor(t*60));
+    for(let i=0;i<70*sp;i++){const a=rr()*6.283,r1=200+rr()*700,len=100+rr()*500*sp;ctx.strokeStyle=`rgba(255,230,190,${.15+.4*sp*rr()})`;ctx.lineWidth=1+rr()*2;
+      ctx.beginPath();ctx.moveTo(960+Math.cos(a)*r1,HZ+Math.sin(a)*r1*.6);ctx.lineTo(960+Math.cos(a)*(r1+len),HZ+Math.sin(a)*(r1+len)*.6);ctx.stroke()}ctx.restore()}
+  // lyrics
+  drawTL(LY.d1,t,960,215,{font:'800 128px MJ',color:'#fff8ea',glow:'rgba(255,170,90,.9)',glowSize:30,caretHold:.2,caretColor:'#fff'});
+  drawTL(LY.d2,t,960,322,{font:'800 58px MJ',color:'#ffe2a6',glow:'rgba(20,6,30,.95)',glowSize:22,hot:'#fff',strike:false});
+  ctx.save();ctx.font='700 24px MONO';ctx.textAlign='center';ctx.letterSpacing='10px';ctx.fillStyle='rgba(255,255,255,.75)';ctx.globalAlpha=inv(bt(60),bt(61),t);
+  ctx.fillText('ROMANS 10:15  ·  로마서 10장 15절',960,385);ctx.restore();
+  // whiteout build
+  const wo=eInCubic(inv(T5-.7,T5,t));if(wo>0){ctx.fillStyle=`rgba(255,248,235,${wo})`;ctx.fillRect(0,0,W,H)}
+}
+
+// ───────────────────── scene 5 : 전도 ─────────────────────
+function scene5(t){
+  const lt=t-T5,cx=960,cy=470;
+  ctx.fillStyle='#050404';ctx.fillRect(0,0,W,H);
+  // rays
+  ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(cx,cy);const pb=pulse(t,BEAT,6);
+  for(let i=0;i<40;i++){const a=i/40*6.283+lt*.18,w=.025+.02*((i*7)%3);const g=ctx.createRadialGradient(0,0,80,0,0,1400);
+    g.addColorStop(0,`rgba(255,200,110,${.07+.1*pb})`);g.addColorStop(1,'rgba(255,170,80,0)');ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,1400,a-w,a+w);ctx.fill()}
+  const g=ctx.createRadialGradient(0,0,0,0,0,800);g.addColorStop(0,`rgba(255,190,100,${.35+.2*pb})`);g.addColorStop(1,'rgba(255,150,60,0)');ctx.fillStyle=g;ctx.fillRect(-900,-900,1800,1800);
+  ctx.restore();
+  // shockwave rings on downbeats
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  for(let k=0;k<4;k++){const tb=T5+k*BAR,a=t-tb;if(a<0||a>1.2)continue;ctx.strokeStyle=`rgba(255,230,180,${(1-a/1.2)*.8})`;ctx.lineWidth=10*(1-a/1.2)+1;
+    ctx.beginPath();ctx.arc(cx,cy,60+eOutCubic(a/1.2)*1100,0,6.283);ctx.stroke()}
+  // embers
+  for(const e of EMB){const k=(1-Math.exp(-lt*2.6))/2.6;const x=cx+Math.cos(e.a)*e.v*k+Math.sin(lt*2+e.ph)*20,y=cy+Math.sin(e.a)*e.v*k*.7-lt*e.up;
+    const fl=.4+.6*Math.abs(Math.sin(lt*6+e.ph));ctx.fillStyle=`rgba(255,${180+60*fl},${90+80*fl},${fl*(1-inv(4.5,5.9,lt)*.8)})`;ctx.fillRect(x,y,e.s,e.s)}
+  ctx.restore();
+  // 전도 — per-glyph slam onto offscreen, then gold fill + specular shine
+  txc.clearRect(0,0,W,H);txc.save();txc.font='470px BHS';txc.textBaseline='middle';txc.textAlign='center';
+  const glyphs=['전','도'],gw=glyphs.map(c=>txc.measureText(c).width),tot=gw[0]+gw[1]+20;let gx=cx-tot/2;
+  for(let i=0;i<2;i++){const ta=t-(T5+i*BEAT),x=gx+gw[i]/2;gx+=gw[i]+20;if(ta<0)continue;
+    const s=lerp(3.2,1,eOutExpo(ta/.28));txc.save();txc.translate(x,cy);txc.scale(s,s);txc.globalAlpha=inv(0,.06,ta);txc.fillStyle='#fff';txc.fillText(glyphs[i],0,0);txc.restore()}
+  txc.globalCompositeOperation='source-atop';
+  const gg=txc.createLinearGradient(0,cy-230,0,cy+230);gg.addColorStop(0,'#fff6d6');gg.addColorStop(.45,GOLD);gg.addColorStop(1,'#c9822a');txc.fillStyle=gg;txc.fillRect(0,0,W,H);
+  const sh=((t-B0)%BAR)/BAR,sx=lerp(-300,W+300,eInOut(sh));
+  const sg=txc.createLinearGradient(sx-180,0,sx+180,0);sg.addColorStop(0,'rgba(255,255,255,0)');sg.addColorStop(.5,'rgba(255,255,255,.95)');sg.addColorStop(1,'rgba(255,255,255,0)');
+  txc.fillStyle=sg;txc.save();txc.transform(1,0,-.4,1,0,0);txc.fillRect(sx-180+cy*.4-400,0,760,H);txc.restore();
+  txc.restore();
+  const imp=Math.max(Math.exp(-Math.max(0,lt-.25)*10)*(lt>.25?1:0),Math.exp(-Math.max(0,lt-.62)*10)*(lt>.62?1:0));
+  const [sx2,sy2]=shake(t,30*imp+3*pb);
+  ctx.save();ctx.shadowColor='rgba(255,170,60,.9)';ctx.shadowBlur=60+40*pb;ctx.drawImage(TX,sx2,sy2);ctx.restore();
+  // outline echoes per beat
+  if(lt>.7){ctx.save();ctx.font='470px BHS';ctx.textBaseline='middle';ctx.textAlign='center';ctx.lineWidth=3;
+    const a=((t-B0)%BEAT)/BEAT;const s=1+a*.25;ctx.translate(cx,cy);ctx.scale(s,s);ctx.strokeStyle=`rgba(255,207,107,${(1-a)*.45})`;
+    ctx.strokeText('전',-tot/2+gw[0]/2,0);ctx.strokeText('도',-tot/2+gw[0]+20+gw[1]/2,0);ctx.restore()}
+  // subtitle
+  ctx.save();ctx.font='700 30px MONO';ctx.textAlign='center';const sa=inv(bt(68),bt(70),t);ctx.globalAlpha=sa;ctx.fillStyle=GOLD;
+  ctx.letterSpacing=`${lerp(40,14,eOutExpo(sa))}px`;ctx.fillText('THE GREAT COMMISSION  ·  MATTHEW 28:19',cx,cy+300);ctx.letterSpacing='0px';
+  ctx.fillRect(cx-300*sa,cy+325,600*sa,2);ctx.restore();
+  drawTL(LY.e1,t,cx,cy+430,{font:'700 62px MONO',color:'#ffffff',glow:GOLD,glowSize:20,caretHold:9});
+}
+
+// ───────────────────── post / overlays ─────────────────────
+const SCN=['DARKNESS → LIGHT','GO — 가라','ONE TO ONE','BEAUTIFUL FEET','傳道 JEONDO'];
+function sceneIdx(t){return t<T2?0:t<T3?1:t<T4?2:t<T5?3:4}
+function tc(t){const f=Math.floor(t*30)%30,s=Math.floor(t);return`00:00:${String(s).padStart(2,'0')}:${String(f).padStart(2,'0')}`}
+function hud(t){
+  const a=inv(.2,1,t)*(1-inv(28.8,29.6,t));if(a<=0)return;const si=sceneIdx(t);
+  ctx.save();ctx.globalAlpha=a*.85;ctx.font='700 21px MONO';ctx.letterSpacing='3px';
+  const light=si===1&&t<T2+3&&[1,2].includes(Math.min(3,Math.floor((t-T2)/(2*BEAT))));
+  const col=light?'rgba(10,10,12,.85)':'rgba(255,255,255,.8)';ctx.fillStyle=col;ctx.strokeStyle=col;ctx.lineWidth=2;
+  const m=56,L=34;
+  for(const[x,y,sx,sy]of[[m,m,1,1],[W-m,m,-1,1],[m,H-m,1,-1],[W-m,H-m,-1,-1]]){ctx.beginPath();ctx.moveTo(x,y+sy*L);ctx.lineTo(x,y);ctx.lineTo(x+sx*L,y);ctx.stroke()}
+  if(caretOn(t)){ctx.fillStyle=RED;ctx.beginPath();ctx.arc(m+30,m+34,7,0,6.283);ctx.fill()}ctx.fillStyle=col;
+  ctx.fillText('REC   전도 · MOTION REEL',m+48,m+41);
+  ctx.textAlign='right';ctx.fillText(tc(t),W-m-20,m+41);
+  ctx.textAlign='left';ctx.fillText(`SCENE 0${si+1}/05 — ${SCN[si]}`,m+20,H-m-20);
+  ctx.textAlign='right';ctx.fillText('160 BPM',W-m-130,H-m-20);
+  const bi=t<B0?-1:Math.floor((t-B0)/BEAT)%4;
+  for(let i=0;i<4;i++){ctx.globalAlpha=a*(i===bi?1:.3);ctx.fillStyle=i===bi?(i===0?RED:GOLD):col;ctx.fillRect(W-m-110+i*24,H-m-37,16,16)}
+  ctx.restore();
+}
+function chroma(amt){
+  if(amt<.6)return;fxc.globalCompositeOperation='copy';fxc.drawImage(cv,0,0);
+  ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='copy';ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);ctx.globalCompositeOperation='lighter';
+  for(const[c,d]of[['#ff0000',-amt],['#00ff00',0],['#0000ff',amt]]){chc.globalCompositeOperation='copy';chc.drawImage(FX,0,0);chc.globalCompositeOperation='multiply';chc.fillStyle=c;chc.fillRect(0,0,W,H);ctx.drawImage(CH,d,d*.3)}
+  ctx.restore();
+}
+function glitch(t,amt){
+  if(amt<=.02)return;fxc.globalCompositeOperation='copy';fxc.drawImage(cv,0,0);const r=rng(Math.floor(t*60)+5);
+  for(let i=0;i<Math.floor(6+amt*22);i++){const y=r()*H,h=8+r()*90*amt,dx=(r()-.5)*260*amt;ctx.drawImage(FX,0,y,W,h,dx,y,W,h)}
+  ctx.fillStyle=`rgba(255,48,69,${.25*amt})`;for(let i=0;i<4;i++){ctx.fillRect(0,r()*H,W,2+r()*6)}
+}
+function shutter(t,b){ // horizontal blades close into the cut, then open
+  const c=eInCubic(inv(b-.28,b,t)),o=eOutExpo(inv(b,b+.32,t)),n=9,hh=H/n;if(c<=0||o>=1)return;
+  ctx.fillStyle='#000';for(let i=0;i<n;i++){const dir=i%2?1:-1,cov=t<b?c:1-o;const w=W*cov;ctx.fillRect(dir>0?0:W-w,i*hh,w,hh+1)}
+  ctx.fillStyle=GOLD;for(let i=0;i<n;i++){const dir=i%2?1:-1,cov=t<b?c:1-o;const w=W*cov;ctx.fillRect(dir>0?w-6:W-w,i*hh,6,hh)}
+}
+
+function render(t){
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.shadowBlur=0;
+  const si=sceneIdx(t);[scene1,scene2,scene3,scene4,scene5][si](t);
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.shadowBlur=0;
+  // transitions
+  const f2=Math.exp(-Math.max(0,t-T2)*7)*(t>=T2?1:0);if(f2>.01){ctx.fillStyle=`rgba(255,250,235,${f2})`;ctx.fillRect(0,0,W,H)}
+  shutter(t,T3);
+  if(Math.abs(t-T4)<.35)glitch(t,1-Math.abs(t-T4)/.35);
+  const f5=Math.exp(-Math.max(0,t-T5)*4)*(t>=T5?1:0);if(f5>.01){ctx.fillStyle=`rgba(255,250,240,${f5})`;ctx.fillRect(0,0,W,H)}
+  // chromatic punch on downbeats (scenes 2 & 5) and every scene cut
+  let ca=0;if(si===1||si===4)ca=14*pulse(t,BAR,9)+5*pulse(t,BEAT,14);
+  for(const b of[T2,T3,T4,T5]){const d=t-b;if(d>=0&&d<.4)ca=Math.max(ca,22*Math.exp(-d*9))}
+  chroma(ca);
+  ctx.drawImage(VIG,0,0);
+  ctx.globalAlpha=.32;ctx.globalCompositeOperation='overlay';ctx.drawImage(GR[Math.floor(t*24)%6],0,0,W,H);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  hud(t);
+  // outro
+  const out=inv(28.9,29.8,t);if(out>0){ctx.fillStyle=`rgba(0,0,0,${out})`;ctx.fillRect(0,0,W,H);
+    if(caretOn(t)&&t<29.95){ctx.fillStyle=GOLD;ctx.shadowColor=GOLD;ctx.shadowBlur=20;ctx.fillRect(W/2-4,H/2-34,8,68);ctx.shadowBlur=0}}
+  // fade-in
+  const fin=1-inv(0,.35,t);if(fin>0){ctx.fillStyle=`rgba(0,0,0,${fin})`;ctx.fillRect(0,0,W,H)}
+}
+
+// ───────────────────── boot ─────────────────────
+window.KEYS=KEYS;window.BELLS=BELLS;window.render=render;
+window.ready=Promise.all([['400 40px BHS','전도GO'],['800 40px MJ','전도'],['400 40px MONO','전도'],['700 40px MONO','전도']].map(([f,s])=>document.fonts.load(f,s)));
+const qs=new URLSearchParams(location.search);
+if(qs.has('render'))document.body.classList.add('render');
+window.ready.then(()=>{render(qs.has('t')?+qs.get('t'):0);
+  if(qs.has('render'))return;
+  const au=document.getElementById('music'),btn=document.getElementById('play');
+  // 타자 효과음: 브라우저 미리보기에서도 키 소리를 합성해서 들려준다
+  let ac,keyIdx=0,bellIdx=0;
+  function click(at,amp){const n=ac.createBufferSource(),b=ac.createBuffer(1,ac.sampleRate*.05,ac.sampleRate),d=b.getChannelData(0);
+    for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.exp(-i/(ac.sampleRate*.006));n.buffer=b;
+    const f=ac.createBiquadFilter();f.type='bandpass';f.frequency.value=2400+Math.random()*1600;const g=ac.createGain();g.gain.value=amp;n.connect(f).connect(g).connect(ac.destination);n.start(at)}
+  function bell(at){const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=2093;g.gain.setValueAtTime(.08,at);g.gain.exponentialRampToValueAtTime(.0001,at+.7);o.connect(g).connect(ac.destination);o.start(at);o.stop(at+.8)}
+  const ks=[...KEYS].sort((a,b)=>a-b),bs=[...BELLS].sort((a,b)=>a-b);
+  btn.onclick=()=>{ac=ac||new AudioContext();au.currentTime=0;keyIdx=0;bellIdx=0;au.play();btn.style.display='none';
+    (function loop(){const t=au.currentTime;if(t>=DUR||au.ended){au.pause();btn.style.display='flex';btn.textContent='↻ REPLAY';render(DUR-.01);return}
+      const look=t+.1,base=ac.currentTime-t;
+      while(keyIdx<ks.length&&ks[keyIdx]<look){if(ks[keyIdx]>=t-.02)click(Math.max(ac.currentTime,base+ks[keyIdx]),.35);keyIdx++}
+      while(bellIdx<bs.length&&bs[bellIdx]<look){if(bs[bellIdx]>=t-.02)bell(Math.max(ac.currentTime,base+bs[bellIdx]));bellIdx++}
+      au.volume=1-inv(28.6,30,t);render(t);requestAnimationFrame(loop)})()};
+});
+</script>
+</body>
+</html>
