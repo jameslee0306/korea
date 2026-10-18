@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="🎲 버튼을 누르면 오늘 외울 성경이 뽑히고 영상이 나와요">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jameslee0306.github.io/korea/bible/">
+<meta property="og:title" content="무작위 성경목록 하기">
+<meta property="og:description" content="오늘은 어디를 외울까요? 🎲 버튼을 눌러보세요!">
+<meta property="og:image" content="https://jameslee0306.github.io/korea/bible/images/og.png">
+<meta property="og:image:width" content="1080">
+<meta property="og:image:height" content="1080">
+<meta name="twitter:card" content="summary_large_image">
+<style>*,*::before,*::after{box-sizing:border-box}html{color-scheme:light}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px))!important;padding-right:max(16px,env(safe-area-inset-right,0px))!important}</style>
+<title>무작위 성경목록 하기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;600;800&display=swap">
+<style>
+/* Layout: one column "draw table" — big result card on top, draw button, then the book list as chips */
+:root{
+  --bg:#eef3f6; --surface:#ffffff; --ink:#1d2b3a; --muted:#5d6e7e;
+  --accent:#d98a1e; --accent-ink:#ffffff; --deep:#24506e; --line:#d4dee6;
+  --chip:#e3ecf2; --danger:#b8432f;
+  --display:"Jua","Noto Sans KR",system-ui,sans-serif;
+  --body:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121a22; --surface:#1b2631; --ink:#eaf1f6; --muted:#9fb1c0;
+  --accent:#f0a540; --accent-ink:#1b1206; --deep:#7fb6db; --line:#2c3a47;
+  --chip:#243341; --danger:#ff8a73; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121a22; --surface:#1b2631; --ink:#eaf1f6; --muted:#9fb1c0;
+  --accent:#f0a540; --accent-ink:#1b1206; --deep:#7fb6db; --line:#2c3a47;
+  --chip:#243341; --danger:#ff8a73; color-scheme:dark}
+
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:18px;line-height:1.5}
+.wrap{max-width:720px;margin:0 auto;padding-block:20px 48px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:20px}
+header h1{font-family:var(--display);font-weight:400;font-size:clamp(30px,7vw,44px);margin:0;color:var(--deep);text-wrap:balance}
+header p{margin:4px 0 0;color:var(--muted);font-size:17px}
+
+.stage{background:var(--surface);border:2px solid var(--line);border-radius:24px;padding:24px 16px;
+  display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;min-height:260px;justify-content:center}
+.emoji{font-size:clamp(84px,22vw,128px);line-height:1;filter:drop-shadow(0 6px 10px rgba(0,0,0,.12))}
+.name{font-family:var(--display);font-size:clamp(40px,11vw,64px);line-height:1.1;color:var(--ink)}
+.hint{color:var(--muted);font-size:17px;margin:0}
+.stage.rolling .emoji{animation:bob .18s ease-in-out infinite alternate}
+.stage.done .emoji{animation:pop .6s cubic-bezier(.2,1.6,.4,1)}
+.stage.done .name{animation:rise .5s ease-out}
+@keyframes bob{from{transform:translateY(-4px) rotate(-6deg)}to{transform:translateY(4px) rotate(6deg)}}
+@keyframes pop{0%{transform:scale(.3)}100%{transform:scale(1)}}
+@keyframes rise{from{transform:translateY(10px);opacity:.3}to{transform:none;opacity:1}}
+
+.video-box{width:100%;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;max-width:100%}
+.video-box video{width:100%;height:100%;display:block}
+.novideo{color:var(--muted);font-size:16px;margin:0}
+
+.draw{font-family:var(--display);font-size:clamp(28px,7vw,36px);border:0;border-radius:20px;padding:20px 24px;
+  background:var(--accent);color:var(--accent-ink);cursor:pointer;box-shadow:0 6px 0 rgba(0,0,0,.18);transition:transform .08s}
+.draw:active{transform:translateY(4px);box-shadow:0 2px 0 rgba(0,0,0,.18)}
+.draw:disabled{opacity:.6;cursor:wait}
+button:focus-visible,input:focus-visible{outline:3px solid var(--deep);outline-offset:3px}
+
+section h2{font-size:20px;margin:0 0 10px;color:var(--deep);font-weight:800}
+.chips{display:flex;flex-wrap:wrap;gap:10px;list-style:none;margin:0;padding:0}
+.chip{display:flex;align-items:center;gap:6px;background:var(--chip);border-radius:999px;padding:8px 8px 8px 14px;font-size:19px;font-weight:600}
+.chip.hit{background:var(--accent);color:var(--accent-ink)}
+.chip .film{font-size:14px;opacity:.75}
+.chip button{border:0;background:transparent;color:inherit;font-size:20px;width:36px;height:36px;border-radius:50%;cursor:pointer;line-height:1}
+.chip button:hover{background:rgba(0,0,0,.08)}
+
+.add{display:grid;grid-template-columns:1fr 92px auto;gap:10px}
+.add input{font:inherit;font-size:19px;padding:14px;border:2px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);min-width:0}
+.add input#emojiInput{text-align:center}
+.add button{font-family:var(--body);font-weight:800;font-size:19px;border:0;border-radius:14px;padding:0 20px;background:var(--deep);color:var(--surface);cursor:pointer}
+.msg{min-height:1.5em;margin:6px 0 0;font-size:16px;color:var(--muted)}
+.msg.err{color:var(--danger)}
+.cover img{display:block;width:100%;max-width:520px;height:auto;margin:0 auto;border-radius:24px;box-shadow:0 10px 24px rgba(0,0,0,.18)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.draw{max-width:520px;width:100%;margin:0 auto}
+.manage{background:var(--surface);border:2px solid var(--line);border-radius:20px}
+.manage summary{cursor:pointer;padding:16px 18px;font-size:19px;font-weight:800;color:var(--deep);list-style-position:inside}
+.manage-body{display:flex;flex-direction:column;gap:20px;padding:0 18px 18px}
+.wrap{padding-block:14px 40px;gap:16px}
+.stage{min-height:220px}
+.reset{margin-top:12px;border:0;background:none;color:var(--muted);text-decoration:underline;font:inherit;font-size:15px;cursor:pointer;padding:6px 0}
+@media (max-width:460px){.add{grid-template-columns:1fr 80px}.add button{grid-column:1/-1;padding:14px}}
+@media (prefers-reduced-motion:reduce){.stage *{animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="cover">
+    <h1 class="sr">무작위 성경목록 하기</h1>
+    <img src="images/cover.jpg" alt="무작위 성경목록 하기 — 오늘은 어디를 외울까요? 창세기, 출애굽기, 레위기, 민수기, 신명기" width="900" height="900">
+  </header>
+
+  <button class="draw" id="drawBtn">🎲 목록 뽑기</button>
+
+  <div class="stage" id="stage" aria-live="polite" hidden>
+    <div class="emoji" id="emoji"></div>
+    <div class="name" id="name"></div>
+    <p class="hint" id="hint"></p>
+    <div class="video-box" id="videoBox" hidden>
+      <video id="video" controls playsinline preload="none"></video>
+    </div>
+    <p class="novideo" id="noVideo" hidden>이 목록은 아직 영상이 없어요</p>
+  </div>
+
+  <details class="manage" id="manage">
+  <summary>⚙️ 목록 보기 · 추가하기</summary>
+  <div class="manage-body">
+  <section>
+    <h2>뽑기 목록</h2>
+    <ul class="chips" id="chips"></ul>
+  </section>
+
+  <section>
+    <h2>목록 추가</h2>
+    <form class="add" id="addForm" autocomplete="off">
+      <input id="nameInput" placeholder="예: 여호수아" aria-label="성경 이름" maxlength="20">
+      <input id="emojiInput" placeholder="자동" aria-label="이모콘 (비우면 자동)" maxlength="4">
+      <button type="submit">＋ 추가</button>
+    </form>
+    <p class="msg" id="msg">이모콘 칸을 비워두면 성경 이름에 맞게 자동으로 붙어요.</p>
+    <button class="reset" id="resetBtn" type="button">처음 5권으로 되돌리기</button>
+  </section>
+  </div>
+  </details>
+</div>
+
+<script>
+const EMOJI = {
+ "창세기":"🌍","출애굽기":"🌊","레위기":"🔥","민수기":"🏕️","신명기":"📜",
+ "여호수아":"🎺","사사기":"⚔️","룻기":"🌾","사무엘상":"👑","사무엘하":"🎵","열왕기상":"🏛️","열왕기하":"🐎",
+ "역대상":"📋","역대하":"🕍","에스라":"📖","느헤미야":"🧱","에스더":"👸","욥기":"🌪️","시편":"🎶","잠언":"💡",
+ "전도서":"⏳","아가":"🌹","이사야":"🕊️","예레미야":"😢","예레미야애가":"💧","에스겔":"🦴","다니엘":"🦁",
+ "호세아":"💍","요엘":"🦗","아모스":"⚖️","오바댜":"⛰️","요나":"🐋","미가":"🏘️","나훔":"🌀","하박국":"🗼",
+ "스바냐":"📯","학개":"🏗️","스가랴":"🐴","말라기":"💰",
+ "마태복음":"🤴","마가복음":"🏃","누가복음":"🩺","요한복음":"🕯️","사도행전":"🔥","로마서":"✝️",
+ "고린도전서":"❤️","고린도후서":"🏺","갈라디아서":"🕊️","에베소서":"🛡️","빌립보서":"😊","골로새서":"👑",
+ "데살로니가전서":"☁️","데살로니가후서":"⏰","디모데전서":"⛪","디모데후서":"🏅","디도서":"🏝️","빌레몬서":"🤝",
+ "히브리서":"⚓","야고보서":"🙌","베드로전서":"🪨","베드로후서":"🌅","요한일서":"💗","요한이서":"✉️",
+ "요한삼서":"🏠","유다서":"🌟","요한계시록":"🌈"
+};
+const DEFAULTS = [
+ {name:"창세기",emoji:"🌍",video:"videos/genesis.mp4"},
+ {name:"출애굽기",emoji:"🌊",video:"videos/exodus.mp4"},
+ {name:"레위기",emoji:"🔥",video:"videos/leviticus.mp4"},
+ {name:"민수기",emoji:"🏕️",video:"videos/numbers.mp4"},
+ {name:"신명기",emoji:"📜",video:"videos/deuteronomy.mp4"}
+];
+const KEY="bible-draw-list-v1";
+let list = load();
+let last = null, rolling = false;
+
+const $ = id => document.getElementById(id);
+const stage=$("stage"), emojiEl=$("emoji"), nameEl=$("name"), hintEl=$("hint"),
+      video=$("video"), videoBox=$("videoBox"), noVideo=$("noVideo"), drawBtn=$("drawBtn"),
+      chips=$("chips"), msg=$("msg");
+
+function load(){
+  try{ const s=JSON.parse(localStorage.getItem(KEY)); if(Array.isArray(s)&&s.length) return s; }catch(e){}
+  return DEFAULTS.map(b=>({...b}));
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(list)); }catch(e){} }
+
+function render(){
+  chips.innerHTML="";
+  list.forEach((b,i)=>{
+    const li=document.createElement("li");
+    li.className="chip"+(last&&last.name===b.name?" hit":"");
+    li.innerHTML=`<span>${b.emoji}</span><span></span>${b.video?'<span class="film" title="영상 있음">🎬</span>':''}`;
+    li.children[1].textContent=b.name;
+    const del=document.createElement("button");
+    del.type="button"; del.textContent="×"; del.setAttribute("aria-label", b.name+" 빼기");
+    del.onclick=()=>{
+      if(list.length<=1){ setMsg("목록은 최소 1개가 있어야 해요.",true); return; }
+      list.splice(i,1); save(); render(); setMsg(`'${b.name}'을(를) 뺐어요.`);
+    };
+    li.appendChild(del);
+    chips.appendChild(li);
+  });
+}
+function setMsg(t,err){ msg.textContent=t; msg.className="msg"+(err?" err":""); }
+
+function pickRandom(){
+  if(list.length===1) return list[0];
+  let p; do{ p=list[Math.floor(Math.random()*list.length)]; }while(last && p.name===last.name);
+  return p;
+}
+
+drawBtn.addEventListener("click",()=>{
+  if(rolling) return;
+  rolling=true; drawBtn.disabled=true;
+  const pick=pickRandom();
+
+  // 휴대폰에서도 소리 나게: 버튼 누르는 순간 영상을 미리 깨워둠
+  video.pause(); videoBox.hidden=true; noVideo.hidden=true;
+  if(pick.video){
+    video.src=pick.video; video.currentTime=0;
+    const p=video.play(); if(p) p.then(()=>video.pause()).catch(()=>{});
+  }
+
+  stage.hidden=false;
+  stage.classList.remove("done"); stage.classList.add("rolling");
+  hintEl.textContent="두구두구두구…";
+  let n=0; const total=18;
+  const tick=()=>{
+    const b=list[Math.floor(Math.random()*list.length)];
+    emojiEl.textContent=b.emoji; nameEl.textContent=b.name;
+    n++;
+    if(n<total) setTimeout(tick, 60+n*n*0.9);
+    else finish(pick);
+  };
+  tick();
+});
+
+function finish(pick){
+  last=pick;
+  stage.classList.remove("rolling"); void stage.offsetWidth; stage.classList.add("done");
+  emojiEl.textContent=pick.emoji; nameEl.textContent=pick.name;
+  hintEl.textContent="오늘은 이 말씀을 외워요!";
+  if(pick.video){
+    videoBox.hidden=false;
+    video.currentTime=0;
+    video.play().catch(()=>{ hintEl.textContent="오늘은 이 말씀을 외워요! ▶ 버튼을 눌러 영상을 보세요"; });
+    setTimeout(()=>videoBox.scrollIntoView({behavior:"smooth",block:"nearest"}),300);
+  } else {
+    noVideo.hidden=false;
+  }
+  rolling=false; drawBtn.disabled=false; drawBtn.textContent="🎲 다시 뽑기";
+  render();
+}
+
+$("addForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const name=$("nameInput").value.trim().replace(/\s+/g,"");
+  if(!name){ setMsg("성경 이름을 적어주세요.",true); $("nameInput").focus(); return; }
+  if(list.some(b=>b.name===name)){ setMsg(`'${name}'은(는) 이미 목록에 있어요.`,true); return; }
+  const emoji=$("emojiInput").value.trim() || EMOJI[name] || "📖";
+  list.push({name,emoji,video:null}); save(); render();
+  $("nameInput").value=""; $("emojiInput").value="";
+  setMsg(`${emoji} '${name}'을(를) 추가했어요.`);
+});
+
+$("resetBtn").addEventListener("click",()=>{
+  list=DEFAULTS.map(b=>({...b})); last=null; save(); render();
+  setMsg("처음 5권으로 되돌렸어요.");
+});
+
+render();
+</script>
+
+</body>
+</html>
