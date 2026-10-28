@@ -90,7 +90,15 @@
   #ytwrap { position: fixed; right: 12px; top: 12px; z-index: 25; width: 200px; aspect-ratio: 16/9; border-radius: 8px;
     overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,.6); transition: opacity .4s; }
   #ytwrap.hidden { opacity: 0; pointer-events: none; }
-  #ytwrap iframe, #ytwrap > div { width: 100%; height: 100%; }
+  #ytwrap iframe, #yt { width: 100%; height: 100%; }
+  /* 소리가 안 나올 때: 영상 창을 크게 띄워서 직접 ▶를 누르게 함 */
+  #ytwrap.big { left: 50%; right: auto; top: 50%; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 32px));
+    z-index: 35; opacity: 1; pointer-events: auto; overflow: visible; }
+  #ythint { display: none; position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 10px; text-align: center;
+    font-size: clamp(15px, 2.4vw, 20px); font-weight: 900; color: var(--fill); filter: drop-shadow(0 2px 4px #000); }
+  #ytwrap.big #ythint { display: block; }
+  .warn { display: none; background: #5a1420; border: 1px solid #a3122a; color: #ffd9de; border-radius: 10px; padding: 10px 14px;
+    font-size: 14px; line-height: 1.6; max-width: 560px; }
 
   /* 타이밍 기록 */
   .rec { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 26; background: #a3122a; color: #fff;
@@ -137,7 +145,7 @@
   </section>
 </div>
 
-<div id="ytwrap"><div id="yt"></div></div>
+<div id="ytwrap"><div id="ythint">소리가 안 나오면 이 영상의 ▶ 버튼을 눌러 주세요</div><div id="yt"></div></div>
 <audio id="audio" preload="auto"></audio>
 
 <!-- ===== 시작 화면 ===== -->
@@ -145,6 +153,7 @@
   <h1>주님 다시 오실때까지</h1>
   <p>원곡 유튜브 소리에 맞춰 가사가 노래방처럼 채워집니다.<br>
      유튜브가 막힌 곳에서는 mp3 파일을 골라서 쓰세요.</p>
+  <div class="warn" id="warn"></div>
   <div class="row"><button class="primary" id="startYt">▶ 유튜브 원곡으로 시작</button></div>
   <div class="row">
     <label class="filebtn">🎵 mp3 파일 고르기<input type="file" id="pick" accept="audio/*"></label>
@@ -278,7 +287,7 @@ const player = {
     return demo.playing;
   },
   play() {
-    if (mode === "yt" && ytReady) yt.playVideo();
+    if (mode === "yt" && ytReady) { yt.unMute(); yt.playVideo(); }
     else if (mode === "file") audio.play();
     else { demo.playing = true; demo.last = performance.now(); }
   },
@@ -300,9 +309,36 @@ window.onYouTubeIframeAPIReady = () => {
   yt = new YT.Player("yt", {
     videoId: YOUTUBE_ID,
     playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 1 },
-    events: { onReady: () => { ytReady = true; if (mode === "yt") yt.playVideo(); } },
+    events: {
+      onReady: () => { ytReady = true; if (mode === "yt") { yt.unMute(); yt.playVideo(); checkSound(); } },
+      onStateChange: e => { if (e.data === 1) $("#ytwrap").classList.remove("big"); },
+      onError: e => ytFail(e.data),
+    },
   });
 };
+
+// 브라우저가 자동 재생을 막으면 영상 창을 크게 띄워 직접 ▶를 누르게 함
+function checkSound() {
+  setTimeout(() => {
+    if (mode === "yt" && ytReady && yt.getPlayerState() !== 1) $("#ytwrap").classList.add("big");
+  }, 2500);
+}
+function ytFail(code) {
+  const why = { 2: "영상 주소가 잘못되었습니다.", 5: "이 브라우저에서 재생할 수 없습니다.",
+    100: "영상이 삭제되었거나 비공개입니다.", 101: "영상 주인이 다른 사이트에서의 재생을 막아 두었습니다.",
+    150: "영상 주인이 다른 사이트에서의 재생을 막아 두었습니다.",
+    153: "파일로 직접 열어서 유튜브가 재생을 거부했습니다. 웹 주소(https://...)로 열어 주세요." }[code] || "";
+  alert("유튜브 소리를 재생할 수 없습니다 (오류 " + code + "). " + why + "\n\nmp3 파일을 골라서 쓰실 수 있습니다.");
+  location.reload();
+}
+
+// 컴퓨터/휴대폰에 받은 파일을 그대로 열면 유튜브가 막는 경우가 많음
+if (location.protocol === "file:") {
+  const w = $("#warn");
+  w.innerHTML = "지금 이 화면은 파일로 열려 있어서 유튜브 소리가 안 나올 수 있습니다.<br>" +
+    "웹 주소로 열거나, 아래 <b>mp3 파일 고르기</b>를 써 주세요.";
+  w.style.display = "block";
+}
 
 function start(m) {
   mode = m;
@@ -313,6 +349,7 @@ function start(m) {
     alert("유튜브를 불러오지 못했습니다. 인터넷 연결을 확인하거나 mp3 파일을 골라 주세요.");
   }
   player.play();
+  if (m === "yt") checkSound();
 }
 $("#startYt").onclick = () => start("yt");
 $("#startDemo").onclick = () => start("demo");
