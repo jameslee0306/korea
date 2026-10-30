@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>벧엘 금요 기도회</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Serif+KR:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #04030c; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  /* 16:9 고정 비율, 화면에 맞춰 레터박스 */
+  canvas { width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+(() => {
+  const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+  const LOOP = 12;              // 배경 파티클 반복 주기(초) – 영상 루프용
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d');
+  const params = new URLSearchParams(location.search);
+  const RENDER = params.has('render');
+
+  // 결정적 난수 (프레임 렌더링 시 항상 같은 결과)
+  let seed = 20261030;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+
+  // ---------- 스프라이트 미리 그리기 ----------
+  function makeTextSprite(color, glow) {
+    const s = document.createElement('canvas');
+    s.width = 360; s.height = 200;
+    const g = s.getContext('2d');
+    g.font = '140px "Black Han Sans", "Noto Serif KR", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = glow; g.shadowBlur = 28;
+    g.fillStyle = color;
+    g.fillText('기도', 180, 104);
+    g.shadowBlur = 0;
+    g.fillText('기도', 180, 104);
+    return s;
+  }
+  function makeHandSprite() {
+    const s = document.createElement('canvas');
+    s.width = 220; s.height = 220;
+    const g = s.getContext('2d');
+    g.font = '150px "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = 'rgba(255,215,120,0.9)'; g.shadowBlur = 30;
+    g.fillText('🙏', 110, 118);
+    return s;
+  }
+
+  let sprites, particles = [];
+
+  function build() {
+    sprites = [
+      makeTextSprite('#ffe9a8', 'rgba(255,190,60,0.95)'),   // 금색
+      makeTextSprite('#ffffff', 'rgba(150,190,255,0.9)'),   // 흰색-푸른빛
+      makeTextSprite('#ffc76b', 'rgba(255,140,40,0.9)'),    // 진한 금색
+      makeHandSprite(), makeHandSprite()
+    ];
+    const N = 230;
+    for (let i = 0; i < N; i++) {
+      const isHand = rnd() < 0.36;
+      // 반지름 방향으로 고르게 퍼뜨리되 중앙은 조금 비워 둠
+      const ang = rnd() * Math.PI * 2;
+      const rad = 0.25 + Math.sqrt(rnd()) * 1.55;
+      particles.push({
+        sprite: isHand ? 3 + (i % 2) : Math.floor(rnd() * 3),
+        x: Math.cos(ang) * rad * 1.5,
+        y: Math.sin(ang) * rad,
+        phase: rnd(),                              // 깊이 위상
+        cycles: 1 + Math.floor(rnd() * 2),         // LOOP 동안 몇 번 지나가는지 (정수 → 이음매 없는 루프)
+        rot: (rnd() - 0.5) * 0.6,
+        spin: rnd() < 0.5 ? -1 : 1,
+        wob: rnd() * Math.PI * 2,
+        scale: isHand ? 0.55 + rnd() * 0.35 : 0.5 + rnd() * 0.5
+      });
+    }
+    // 반짝이 먼지
+    dust = Array.from({ length: 260 }, () => ({
+      x: rnd() * W, y: rnd() * H, r: 0.6 + rnd() * 2.2,
+      sp: 1 + Math.floor(rnd() * 3), ph: rnd(), tw: 1 + Math.floor(rnd() * 4)
+    }));
+  }
+  let dust = [];
+
+  // ---------- 배경 ----------
+  function drawBackground(t) {
+    const g = ctx.createRadialGradient(CX, CY, 50, CX, CY, 1150);
+    g.addColorStop(0, '#2a1a4a');
+    g.addColorStop(0.45, '#120b2c');
+    g.addColorStop(1, '#030209');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // 회전하는 빛줄기
+    const a0 = (t / LOOP) * Math.PI * 2 / 6;
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 12; i++) {
+      const a = a0 + i * Math.PI * 2 / 12;
+      ctx.rotate(0);
+      const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1300);
+      rg.addColorStop(0, 'rgba(255,210,130,0.16)');
+      rg.addColorStop(1, 'rgba(255,210,130,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 1300, a - 0.07, a + 0.07);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 중앙 후광
+    const halo = ctx.createRadialGradient(CX, CY, 0, CX, CY, 650);
+    const pulse = 0.85 + 0.15 * Math.sin(t / LOOP * Math.PI * 4);
+    halo.addColorStop(0, `rgba(255,220,150,${0.32 * pulse})`);
+    halo.addColorStop(0.5, `rgba(200,140,255,${0.10 * pulse})`);
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawDust(t) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (const d of dust) {
+      const y = ((d.y - (t / LOOP) * d.sp * H) % H + H) % H;
+      const a = 0.35 + 0.65 * Math.abs(Math.sin((t / LOOP + d.ph) * Math.PI * d.tw));
+      ctx.fillStyle = `rgba(255,236,190,${a * 0.8})`;
+      ctx.beginPath();
+      ctx.arc(d.x, y, d.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // ---------- 날아다니는 "기도" & 기도손 ----------
+  function drawParticles(t) {
+    const list = particles.map(p => {
+      // 깊이: 1(멀리) → 0.08(가까이) 반복
+      const f = ((p.phase + (t / LOOP) * p.cycles) % 1);
+      const z = 1 - f * 0.92;
+      return { p, z, f };
+    }).sort((a, b) => b.z - a.z);   // 먼 것부터
+
+    const focal = 420;
+    for (const { p, z, f } of list) {
+      const wob = Math.sin(p.wob + (t / LOOP) * Math.PI * 2 * 2) * 0.06;
+      const x = CX + ((p.x + wob) / z) * focal;
+      const y = CY + ((p.y + wob * 0.6) / z) * focal;
+      const size = (p.scale / z) * 0.55;
+      if (x < -500 || x > W + 500 || y < -500 || y > H + 500) continue;
+
+      // 멀리서 서서히 나타나고 가까이 오면 사라짐
+      let alpha = Math.min(1, f / 0.18) * Math.min(1, (1 - f) / 0.22);
+      // 화면 중앙 큰 글씨 영역 위를 지날 땐 살짝 투명하게
+      const dx = (x - CX) / 900, dy = (y - CY) / 260;
+      if (dx * dx + dy * dy < 1) alpha *= 0.35 + 0.65 * (dx * dx + dy * dy);
+      if (alpha <= 0.01) continue;
+
+      const spr = sprites[p.sprite];
+      const ang = p.rot + p.spin * 0.25 * Math.sin(p.wob + (t / LOOP) * Math.PI * 2);
+      ctx.save();
+      ctx.globalAlpha = alpha * (0.45 + 0.55 * (1 - z));
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      ctx.drawImage(spr, -spr.width * size / 2, -spr.height * size / 2, spr.width * size, spr.height * size);
+      ctx.restore();
+    }
+  }
+
+  // ---------- 메인 타이틀 ----------
+  const TITLE = '벧엘 금요 기도회';
+  const SUB = 'BETHEL  FRIDAY  PRAYER  MEETING';
+  const ease = x => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+
+  function drawTitle(t) {
+    const fontSize = 205;
+    ctx.save();
+    ctx.font = `${fontSize}px "Black Han Sans", "Noto Serif KR", sans-serif`;
+    ctx.textBaseline = 'middle';
+    const chars = [...TITLE];
+    const widths = chars.map(c => ctx.measureText(c).width);
+    const gap = 6;
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
+    const ty = CY - 30;
+
+    // 금색 그라디언트 + 빛이 지나가는 반짝임
+    const sweep = ((t % 4) / 4) * (total + 1200) - 600;
+    const left = CX - total / 2;
+    const gold = ctx.createLinearGradient(0, -fontSize * 0.42, 0, fontSize * 0.42);
+    gold.addColorStop(0, '#fff8dc');
+    gold.addColorStop(0.35, '#ffd76e');
+    gold.addColorStop(0.5, '#f0a92a');
+    gold.addColorStop(0.62, '#c9801a');
+    gold.addColorStop(1, '#ffe49a');
+
+    let x = left;
+    chars.forEach((c, i) => {
+      const k = ease((t - 0.3 - i * 0.12) / 0.9);    // 글자별 순차 등장
+      const w = widths[i];
+      if (k > 0 && c !== ' ') {
+        const cx = x + w / 2;
+        const s = 1.6 - 0.6 * k;
+        const blur = (1 - k) * 18;
+        ctx.save();
+        ctx.translate(cx, ty + (1 - k) * 40);
+        ctx.scale(s, s);
+        ctx.globalAlpha = k;
+        ctx.textAlign = 'center';
+        if (blur > 0.5) ctx.filter = `blur(${blur}px)`;
+
+        // 외곽 발광
+        ctx.shadowColor = 'rgba(255,190,70,0.95)';
+        ctx.shadowBlur = 60;
+        ctx.fillStyle = gold;
+        ctx.fillText(c, 0, 0);
+        // 테두리
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = 'rgba(120,60,10,0.85)';
+        ctx.strokeText(c, 0, 0);
+        ctx.fillStyle = gold;
+        ctx.fillText(c, 0, 0);
+
+        // 반짝임
+        const shine = ctx.createLinearGradient(sweep - cx - 160, -100, sweep - cx + 160, 100);
+        shine.addColorStop(0, 'rgba(255,255,255,0)');
+        shine.addColorStop(0.5, 'rgba(255,255,255,0.85)');
+        shine.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = shine;
+        ctx.fillText(c, 0, 0);
+        ctx.restore();
+      }
+      x += w + gap;
+    });
+
+    // 장식선 + 영문 부제
+    const k2 = ease((t - 1.6) / 1.0);
+    if (k2 > 0) {
+      ctx.globalAlpha = k2;
+      const lineW = (total * 0.5) * k2;
+      const ly = ty + fontSize * 0.68;
+      const lg = ctx.createLinearGradient(CX - lineW, 0, CX + lineW, 0);
+      lg.addColorStop(0, 'rgba(255,215,120,0)');
+      lg.addColorStop(0.5, 'rgba(255,225,150,1)');
+      lg.addColorStop(1, 'rgba(255,215,120,0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(CX - lineW, ly, lineW * 2, 3);
+
+      ctx.font = '600 44px "Noto Serif KR", serif';
+      ctx.textAlign = 'center';
+      ctx.letterSpacing = '10px';
+      ctx.shadowColor = 'rgba(255,200,100,0.8)';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#fbe9c0';
+      ctx.fillText(SUB, CX, ly + 62);
+    }
+    ctx.restore();
+  }
+
+  function vignette() {
+    const v = ctx.createRadialGradient(CX, CY, 500, CX, CY, 1150);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.7)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function frame(t) {
+    ctx.globalAlpha = 1;
+    drawBackground(t);
+    drawDust(t);
+    drawParticles(t);
+    vignette();
+    drawTitle(t);
+    // 시작 페이드 인
+    if (t < 0.6) { ctx.fillStyle = `rgba(0,0,0,${1 - t / 0.6})`; ctx.fillRect(0, 0, W, H); }
+  }
+
+  Promise.all([
+    document.fonts.load('140px "Black Han Sans"', '기도'),
+    document.fonts.load('900 100px "Noto Serif KR"', 'B'),
+    document.fonts.load('600 44px "Noto Serif KR"', 'B')
+  ]).catch(() => {}).then(() => document.fonts.ready).then(() => {
+    build();
+    window.renderFrame = frame;
+    window.READY = true;
+    if (!RENDER) {
+      const start = performance.now();
+      const loop = now => { frame((now - start) / 1000); requestAnimationFrame(loop); };
+      requestAnimationFrame(loop);
+    }
+  });
+})();
+</script>
+</body>
+</html>
