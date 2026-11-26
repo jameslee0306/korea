@@ -1,20 +1,22 @@
-"""가계부 엑셀 관리 스크립트.
+"""가계부 엑셀 관리 스크립트 (계좌별, 달러).
 
 사용 예:
-  python3 ledger/ledger.py add 지출 "점심" 12000 --cat 식비 --date 2026-11-26
-  python3 ledger/ledger.py add 수입 "월급" 3000000 --cat 급여
-  python3 ledger/ledger.py start 500000      # 시작 잔액 설정
-  python3 ledger/ledger.py show              # 현재 잔액/요약 출력
+  python3 ledger/ledger.py start 개인 4267        # 계좌 시작 잔액
+  python3 ledger/ledger.py add 지출 개인 "점심" 12.5 --cat 식비 --date 2026-11-26
+  python3 ledger/ledger.py add 수입 공동 "월급" 3000 --cat 급여
+  python3 ledger/ledger.py show
 """
 import argparse, datetime, os
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "가계부.xlsx")
-HEAD = ["날짜", "구분", "항목", "카테고리", "수입", "지출", "잔액", "메모"]
-WON = '#,##0"원"'
+HEAD = ["날짜", "구분", "계좌", "항목", "카테고리", "수입", "지출", "전체 잔액", "메모"]
+USD = '"$"#,##0.00'
 thin = Side(style="thin", color="BBBBBB")
 BOX = Border(left=thin, right=thin, top=thin, bottom=thin)
+# 열 번호
+DATE, KIND, ACCT, ITEM, CAT, INC, EXP, BAL, MEMO = range(1, 10)
 
 
 def new_book():
@@ -27,61 +29,86 @@ def new_book():
         c.fill = PatternFill("solid", fgColor="305496")
         c.alignment = Alignment(horizontal="center")
         c.border = BOX
-    for col, w in zip("ABCDEFGH", [12, 7, 22, 12, 14, 14, 15, 24]):
+    for col, w in zip("ABCDEFGHI", [12, 7, 8, 22, 12, 13, 13, 14, 24]):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
-    # 2행: 시작 잔액
-    ws.append([datetime.date.today(), "시작", "시작 잔액", "", 0, 0, "=E2-F2", ""])
-    style_row(ws, 2)
-
-    s = wb.create_sheet("요약")
-    rows = [("총 수입", "=SUM(가계부!E3:E10000)"),
-            ("총 지출", "=SUM(가계부!F3:F10000)"),
-            ("시작 잔액", "=가계부!E2"),
-            ("현재 잔액", "=가계부!E2+B1-B2")]
-    for i, (k, f) in enumerate(rows, 1):
-        s.cell(i, 1, k).font = Font(bold=True)
-        c = s.cell(i, 2, f)
-        c.number_format = WON
-    s["A4"].font = Font(bold=True, size=13, color="C00000")
-    s["B4"].font = Font(bold=True, size=13, color="C00000")
-    s.column_dimensions["A"].width = 12
-    s.column_dimensions["B"].width = 18
-    s["A6"] = "카테고리별 지출"
-    s["A6"].font = Font(bold=True)
-    wb.save(PATH)
+    wb.create_sheet("요약")
+    return wb
 
 
 def style_row(ws, r):
-    ws.cell(r, 1).number_format = "yyyy-mm-dd"
-    for col in (5, 6, 7):
-        ws.cell(r, col).number_format = WON
-    ws.cell(r, 5).font = Font(color="2E7D32")
-    ws.cell(r, 6).font = Font(color="C62828")
-    ws.cell(r, 7).font = Font(bold=True)
-    for col in range(1, 9):
+    ws.cell(r, DATE).number_format = "yyyy-mm-dd"
+    for col in (INC, EXP, BAL):
+        ws.cell(r, col).number_format = USD
+    ws.cell(r, INC).font = Font(color="2E7D32")
+    ws.cell(r, EXP).font = Font(color="C62828")
+    ws.cell(r, BAL).font = Font(bold=True)
+    for col in range(1, 10):
         ws.cell(r, col).border = BOX
 
 
-def refresh_categories(wb):
-    ws, s = wb["가계부"], wb["요약"]
-    for row in s.iter_rows(min_row=7):
-        for c in row:
-            c.value = None
-    cats = sorted({ws.cell(r, 4).value for r in range(3, ws.max_row + 1)
-                   if ws.cell(r, 2).value == "지출" and ws.cell(r, 4).value})
-    for i, cat in enumerate(cats, 7):
-        s.cell(i, 1, cat)
-        c = s.cell(i, 2, f'=SUMIFS(가계부!F:F,가계부!D:D,A{i},가계부!B:B,"지출")')
-        c.number_format = WON
+def rows(ws):
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(r, KIND).value:
+            yield r
 
 
-def numbers(ws):
-    """수식 대신 파이썬으로 계산한 값 (화면 출력용)."""
-    start = ws["E2"].value or 0
-    inc = sum(ws.cell(r, 5).value or 0 for r in range(3, ws.max_row + 1))
-    exp = sum(ws.cell(r, 6).value or 0 for r in range(3, ws.max_row + 1))
-    return start, inc, exp, start + inc - exp
+def rebuild_summary(wb):
+    ws = wb["가계부"]
+    del wb["요약"]
+    s = wb.create_sheet("요약")
+    s.column_dimensions["A"].width = 14
+    for col in "BCDE":
+        s.column_dimensions[col].width = 14
+    hdr = ["계좌", "시작 잔액", "수입", "지출", "현재 잔액"]
+    for i, h in enumerate(hdr, 1):
+        c = s.cell(1, i, h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="305496")
+        c.alignment = Alignment(horizontal="center")
+    accts = []
+    for r in rows(ws):
+        a = ws.cell(r, ACCT).value
+        if a and a not in accts:
+            accts.append(a)
+    R = "가계부!{}:{}"
+    F, G, B, C = R.format("F", "F"), R.format("G", "G"), R.format("B", "B"), R.format("C", "C")
+    i = 2
+    for i, a in enumerate(accts, 2):
+        s.cell(i, 1, a)
+        s.cell(i, 2, f'=SUMIFS({F},{C},A{i},{B},"시작")')
+        s.cell(i, 3, f'=SUMIFS({F},{C},A{i},{B},"수입")')
+        s.cell(i, 4, f'=SUMIFS({G},{C},A{i},{B},"지출")')
+        s.cell(i, 5, f"=B{i}+C{i}-D{i}")
+    t = len(accts) + 2
+    s.cell(t, 1, "합계")
+    for col in "BCDE":
+        s[f"{col}{t}"] = f"=SUM({col}2:{col}{t-1})"
+    for r in range(2, t + 1):
+        for col in range(2, 6):
+            s.cell(r, col).number_format = USD
+        s.cell(r, 5).font = Font(bold=True)
+    for col in range(1, 6):
+        s.cell(t, col).font = Font(bold=True, size=12, color="C00000")
+    # 카테고리별 지출
+    k = t + 2
+    s.cell(k, 1, "카테고리별 지출").font = Font(bold=True)
+    cats = sorted({ws.cell(r, CAT).value for r in rows(ws)
+                   if ws.cell(r, KIND).value == "지출" and ws.cell(r, CAT).value})
+    E = R.format("E", "E")
+    for j, cat in enumerate(cats, k + 1):
+        s.cell(j, 1, cat)
+        c = s.cell(j, 2, f'=SUMIFS({G},{E},A{j},{B},"지출")')
+        c.number_format = USD
+
+
+def totals(ws):
+    acc = {}
+    for r in rows(ws):
+        a, k = ws.cell(r, ACCT).value, ws.cell(r, KIND).value
+        inc, exp = ws.cell(r, INC).value or 0, ws.cell(r, EXP).value or 0
+        acc[a] = acc.get(a, 0) + inc - exp
+    return acc
 
 
 def main():
@@ -89,36 +116,42 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add")
     a.add_argument("kind", choices=["수입", "지출"])
+    a.add_argument("acct")
     a.add_argument("item")
-    a.add_argument("amount", type=int)
+    a.add_argument("amount", type=float)
     a.add_argument("--cat", default="")
     a.add_argument("--date", default=None)
     a.add_argument("--memo", default="")
     st = sub.add_parser("start")
-    st.add_argument("amount", type=int)
+    st.add_argument("acct")
+    st.add_argument("amount", type=float)
+    st.add_argument("--date", default=None)
     sub.add_parser("show")
     args = p.parse_args()
 
-    if not os.path.exists(PATH):
-        new_book()
-    wb = load_workbook(PATH)
+    wb = load_workbook(PATH) if os.path.exists(PATH) else new_book()
     ws = wb["가계부"]
 
-    if args.cmd == "add":
+    if args.cmd in ("add", "start"):
         d = datetime.date.fromisoformat(args.date) if args.date else datetime.date.today()
-        r = ws.max_row + 1
-        inc = args.amount if args.kind == "수입" else 0
-        exp = args.amount if args.kind == "지출" else 0
-        ws.append([d, args.kind, args.item, args.cat, inc, exp,
-                   f"=G{r-1}+E{r}-F{r}", args.memo])
+        r = max([x for x in rows(ws)] or [1]) + 1
+        if args.cmd == "start":
+            vals = [d, "시작", args.acct, "시작 잔액", "", args.amount, 0]
+        else:
+            inc = args.amount if args.kind == "수입" else 0
+            exp = args.amount if args.kind == "지출" else 0
+            vals = [d, args.kind, args.acct, args.item, args.cat, inc, exp]
+        prev = f"H{r-1}+" if r > 2 else ""
+        for col, v in enumerate(vals + [f"={prev}F{r}-G{r}", getattr(args, "memo", "")], 1):
+            ws.cell(r, col, v)
         style_row(ws, r)
-    elif args.cmd == "start":
-        ws["E2"] = args.amount
 
-    refresh_categories(wb)
+    rebuild_summary(wb)
     wb.save(PATH)
-    start, inc, exp, bal = numbers(ws)
-    print(f"시작 {start:,}원 | 총수입 {inc:,}원 | 총지출 {exp:,}원 | 현재 잔액 {bal:,}원")
+    acc = totals(ws)
+    for k, v in acc.items():
+        print(f"{k}: ${v:,.2f}")
+    print(f"합계: ${sum(acc.values()):,.2f}")
 
 
 if __name__ == "__main__":
